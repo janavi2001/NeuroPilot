@@ -1,0 +1,31 @@
+[project]
+name = "neuropilot"
+version = "0.1.0"
+description = "Step 1: real-EEG inference for NeuroPilot"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "defusedxml>=0.7,<1",
+  "einops>=0.8,<1",
+  "h5py>=3.10,<4",
+  "mne>=1.7,<2",
+  "numpy>=1.26,<3",
+  "mujoco>=3.2,<4",
+  "msgpack>=1.1,<2",
+  "msgpack-numpy>=0.4,<1",
+  "pyzmq>=27,<28",
+  "pyyaml>=6,<7",
+  "scipy>=1.14,<2",
+  "torch>=2.3,<3",
+  "transformers>=4.40,<5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["bci*", "interface*", "robot*", "simulation*"]
+exclude = ["third_party*"]

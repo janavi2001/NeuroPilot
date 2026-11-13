@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.DS_Store
+
+# External model/data artifacts are never source-controlled.
+data/
+artifacts/
+checkpoints/
+*.egg-info/
