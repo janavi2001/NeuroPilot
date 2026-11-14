@@ -22,6 +22,7 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=8,<9"]
 ssvep = ["moabb>=1.2,<2"]
+intracortical = ["scikit-learn>=1.4,<2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

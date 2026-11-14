@@ -1,6 +1,6 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 4d (SSVEP early stopping) is verified. Step 5 has not started.
+NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 4d (SSVEP early stopping) is verified. Step 4e (intracortical decoder) is implemented and awaits the user's verification. Step 5 has not started.
 
 ## Step 1 setup
 
@@ -152,3 +152,19 @@ Held-out S1–S10, 160 trials:
 | Two-look confirm, early | — | 2.5% (2/80) | 2.91 s for both looks | — |
 
 Early stopping is about 27% faster per decision, at the cost of one more wrong decision in 160. With two-look confirm it adds one wrong action in 80 pairs. The demo's statistics panel shows the rates for whichever mode is running.
+
+## Step 4e — intracortical reach-intention decoder (awaiting verification)
+
+Step 4e plugs a second, implant-style decoder into the same robot pipeline. The data is recorded spiking from 162 neurons in macaque M1 and PMd during delayed reaching, from the Neural Latents Benchmark MC_Maze_Large dataset (DANDI 000138; Churchland lab, monkey J). It is read with `h5py` and is not committed. The nine reach targets are grouped by direction and mapped onto the table layout: left → APPLE, up → CUP, upper-right → PHONE, lower-right → CANCEL.
+
+```bash
+./scripts/fetch_nlb_mc_maze.sh
+uv pip install --python .venv/bin/python -e . --group intracortical
+.venv/bin/python scripts/step4e_intracortical_eval.py
+.venv/bin/python scripts/step4e_intracortical_demo.py      # artifacts/videos/step4e/intracortical_demo.mp4
+```
+
+- Decoder: shrinkage LDA on square-root spike counts in 100 ms bins, using only activity before movement onset. No pretrained decoder exists for this data, so this is a small fitted adapter: fitted on the official NLB train split (375 trials) and tested on the held-out val split (125 trials). The window length (400 ms) was chosen by 5-fold cross-validation on the train split only.
+- Held-out results: 97.6% accuracy (95.5% balanced) against a majority-class chance of 34.4%. A shuffled-label control reaches 23.2%. With a 200 ms window, accuracy is 74% at 600 ms before movement and rises to 96% at movement onset.
+- Demo: CUP is decoded and the robot reaches; a CANCEL reach is decoded mid-reach and the robot aborts; APPLE is decoded and picked. Trials are the first held-out val trials of each direction, chosen by ground truth. The robot code is unchanged from the SSVEP demo.
+- Limitations: this is recorded monkey data, replayed; it is not a human or a live implant. Decoding a four-way direction from a well-trained delayed-reach task is easier than free, everyday intent. LDA posteriors are overconfident (often 1.00) and are not calibrated probabilities.
