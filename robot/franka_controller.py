@@ -27,8 +27,13 @@ class FrankaPickController:
     APPROACH_HEIGHT = 0.15
     LIFT_HEIGHT = 0.20
 
-    def __init__(self, simulation: FrankaSimulation, on_step: Callable[[str], None] | None = None) -> None:
+    def __init__(self, simulation: FrankaSimulation, on_step: Callable[[str], None] | None = None,
+                 refine: bool | None = None) -> None:
         self.sim = simulation
+        # Closed-loop correction of steady-state tracking error before closing the gripper. On by
+        # default for the larger scenes, where objects sit far enough off-centre for the 2-5 mm
+        # gravity sag to leave one finger short; the verified three-object scene keeps its behaviour.
+        self.refine = (simulation.scene != "three") if refine is None else refine
         self.model = simulation.model
         self._ik_data = mujoco.MjData(self.model)
         self._lower = self.model.jnt_range[:ARM_JOINTS, 0]
@@ -82,6 +87,8 @@ class FrankaPickController:
 
         self._move("approach", above, rotation, seconds=2.0, gripper=GRIPPER_OPEN)
         self._move("descend", grasp, rotation, seconds=1.2, gripper=GRIPPER_OPEN)
+        if self.refine:
+            self._refine(grasp, rotation)
         self._hold("grasp", seconds=0.8, gripper=GRIPPER_CLOSED)
         contacts_at_grasp = self.sim.finger_contacts(target)
         self._move("lift", grasp + [0, 0, self.LIFT_HEIGHT], rotation, seconds=1.8, gripper=GRIPPER_CLOSED)
@@ -89,9 +96,12 @@ class FrankaPickController:
 
         final = self.sim.position(target)
         tcp = self.sim.tcp_position()
+        # Compare the gripper with the point it grasped (e.g. a bottle's neck), not the body origin.
+        rotation_now = self.sim.data.xmat[self.sim.object_bodies[target]].reshape(3, 3)
+        grip_point = final + rotation_now @ np.array([0.0, 0.0, spec.grasp_height - start[2]])
         disturbed = max(float(np.linalg.norm(self.sim.position(name)[:2] - xy[:2])) for name, xy in others.items())
         lifted = bool(final[2] > start[2] + 0.10)
-        in_hand = bool(np.linalg.norm(final - tcp) < 0.04)
+        in_hand = bool(np.linalg.norm(grip_point - tcp) < 0.04)
         both_fingers = self.sim.finger_contacts(target) == {"left", "right"}
         return {
             "action": action,
@@ -101,7 +111,7 @@ class FrankaPickController:
             "lift_delta": float(final[2] - start[2]),
             "grasp_success": contacts_at_grasp == {"left", "right"},
             "fingers_in_contact_after_lift": both_fingers,
-            "object_tcp_distance": float(np.linalg.norm(final - tcp)),
+            "object_tcp_distance": float(np.linalg.norm(grip_point - tcp)),
             "max_other_object_shift": disturbed,
             "lifted": lifted and in_hand and both_fingers,
             "aborted": False,
@@ -139,6 +149,23 @@ class FrankaPickController:
             self.sim.data.ctrl[:ARM_JOINTS] = a + frac * (b - a)
             self.sim.data.ctrl[ARM_JOINTS] = gripper
             self._step()
+
+    def _refine(self, position: np.ndarray, rotation: np.ndarray, iterations: int = 4, tolerance: float = 5e-4) -> None:
+        """Re-aim by the measured tool-centre-point error until it is within ``tolerance`` (metres)."""
+        aim = position.copy()
+        for _ in range(iterations):
+            error = position - self.sim.tcp_position()
+            if np.linalg.norm(error) < tolerance:
+                return
+            aim = aim + error
+            target = self._solve_ik(aim, rotation, self.sim.data.qpos[:ARM_JOINTS].copy())
+            start = self.sim.data.ctrl[:ARM_JOINTS].copy()
+            steps = int(0.3 / self.model.opt.timestep)
+            self._phase = "descend"
+            for step in range(steps):
+                self.sim.data.ctrl[:ARM_JOINTS] = start + _smoothstep((step + 1) / steps) * (target - start)
+                self.sim.data.ctrl[ARM_JOINTS] = GRIPPER_OPEN
+                self._step()
 
     def _hold(self, phase: str, seconds: float, gripper: float) -> None:
         self._phase = phase

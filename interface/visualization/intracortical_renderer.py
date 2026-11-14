@@ -16,6 +16,8 @@ from simulation.franka_environment import ARM_JOINTS, FrankaSimulation  # noqa: 
 from .hero_renderer import ACCENT, BG, COLORS, MUTED, PANEL, TEXT, VIEW_SIZE, _panel_title, _style  # noqa: E402
 
 SECTORS = {"APPLE": (120, 240), "CUP": (60, 120), "PHONE": (0, 60), "CANCEL": (-60, 0)}
+SIX_SECTORS = {"BANANA": (180, 200), "APPLE": (160, 180), "CUP": (120, 160), "BOTTLE": (60, 120), "PHONE": (0, 60),
+               "CANCEL": (-60, 0)}
 
 
 @dataclass
@@ -57,7 +59,10 @@ class IntracorticalState:
 
 class IntracorticalRenderer:
     def __init__(self, simulation: FrankaSimulation, trials, all_targets: np.ndarray, slowdown: float,
-                 width: int = 1920, height: int = 1080) -> None:
+                 width: int = 1920, height: int = 1080, classes: tuple[str, ...] = tuple(SECTORS),
+                 sectors: dict[str, tuple[float, float]] = SECTORS) -> None:
+        self.classes = classes
+        self.sectors = sectors
         self.sim = simulation
         self.trials = trials
         self.all_targets = all_targets
@@ -118,11 +123,17 @@ class IntracorticalRenderer:
         for spine in ax.spines.values():
             spine.set_color("#30363d")
         _panel_title(ax, "WHAT THE MONKEY SEES", "reach task screen · direction sector → robot object")
-        for name, (a, b) in SECTORS.items():
+        narrow = len(self.sectors) > 4
+        for name, (a, b) in self.sectors.items():
             ax.add_patch(Wedge((0, 0), 158, a, b, facecolor=COLORS[name], alpha=0.07, edgecolor=COLORS[name], linewidth=0.6))
             mid = np.deg2rad((a + b) / 2)
-            ax.text(140 * np.cos(mid), 108 * np.sin(mid) if name != "APPLE" else -100, name, color=COLORS[name],
-                    fontsize=10, ha="center", va="center", fontweight="bold", alpha=0.85)
+            if narrow and name in ("BANANA", "APPLE"):  # thin left wedges: label outside the circle
+                x, y = -150, (-40 if name == "BANANA" else 40)
+            elif name == "APPLE":
+                x, y = -140, -100
+            else:
+                x, y = 140 * np.cos(mid), 108 * np.sin(mid)
+            ax.text(x, y, name, color=COLORS[name], fontsize=10, ha="center", va="center", fontweight="bold", alpha=0.85)
         for xy in self.all_targets:
             ax.add_patch(Rectangle((xy[0] - 6, xy[1] - 6), 12, 12, facecolor="#30363d", edgecolor="#484f58"))
         ax.add_patch(Circle((0, 0), 5, facecolor="#484f58"))
@@ -168,7 +179,7 @@ class IntracorticalRenderer:
     def _race(self, ax, state) -> None:
         play, t, live = self._active(state)
         _style(ax)
-        names = list(COLORS)
+        names = list(self.classes)
         probabilities = (play.final["scores"] if (play and not live) else play.probabilities_at(t)) if play else None
         subtitle = ("waiting for a trial" if play is None else
                     f"decided at movement onset · LDA posterior {play.final['score']:.2f} (uncalibrated)" if not live else

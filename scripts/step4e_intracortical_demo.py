@@ -20,25 +20,23 @@ from pathlib import Path
 import numpy as np
 
 from bci.intracortical_decoder import DecoderWindow, ReachIntentDecoder
-from bci.nlb_data import DEFAULT_NWB, DIRECTION_TARGETS, load_mc_maze
+from bci.nlb_data import DEFAULT_NWB, SCHEME_TARGETS, load_mc_maze
 from interface.visualization.hero_renderer import ACCENT, COLORS
-from interface.visualization.intracortical_renderer import (IntracorticalRenderer, IntracorticalState,
-                                                            ReachPlayback)
+from interface.visualization.intracortical_renderer import (SECTORS, SIX_SECTORS, IntracorticalRenderer,
+                                                            IntracorticalState, ReachPlayback)
 from robot.franka_controller import FrankaPickController
 from simulation.franka_environment import FrankaSimulation
 
 FPS = 25
 SLOWDOWN = 2.0  # playback runs at half speed so the spikes are readable
-SECTOR_ANGLE = {"APPLE": 180.0, "CUP": 90.0, "PHONE": 30.0, "CANCEL": -30.0}
-
-
-def preferred_order(trials, train: np.ndarray, window: DecoderWindow) -> np.ndarray:
+def preferred_order(trials, train: np.ndarray, window: DecoderWindow, classes) -> np.ndarray:
     """Unit display order by preferred reach direction (train trials only)."""
     counts = np.stack([trials.spike_counts(i, window.start, window.stop, window.stop - window.start)[:, 0]
                        for i in train])
     labels = trials.labels[train]
-    angles = np.deg2rad([SECTOR_ANGLE[c] for c in DIRECTION_TARGETS])
-    means = np.stack([counts[labels == c].mean(axis=0) for c in DIRECTION_TARGETS], axis=1)
+    xy = trials.target_xy[train]
+    angles = np.array([np.angle(np.exp(1j * np.arctan2(xy[labels == c, 1], xy[labels == c, 0])).mean()) for c in classes])
+    means = np.stack([counts[labels == c].mean(axis=0) for c in classes], axis=1)
     vector = means @ np.exp(1j * angles)
     return np.argsort(np.angle(vector))
 
@@ -46,23 +44,25 @@ def preferred_order(trials, train: np.ndarray, window: DecoderWindow) -> np.ndar
 class Demo:
     def __init__(self, args) -> None:
         self.args = args
-        self.trials = load_mc_maze(args.nwb)
+        self.classes = SCHEME_TARGETS[args.scheme]
+        self.trials = load_mc_maze(args.nwb, args.scheme)
         trials = self.trials
         self.train = np.flatnonzero(trials.split == "train")
         self.unused = {c: [int(i) for i in np.flatnonzero((trials.split == "val") & (trials.labels == c))]
-                       for c in DIRECTION_TARGETS}
+                       for c in self.classes}
         evaluation = json.loads(args.eval.read_text()) if args.eval.is_file() else None
         w = evaluation["window"] if evaluation else {"start": -0.4, "stop": 0.0, "bin_seconds": 0.1}
         self.window = DecoderWindow(w["start"], w["stop"], w["bin_seconds"])
-        self.decoder = ReachIntentDecoder(DIRECTION_TARGETS, self.window).fit(trials, self.train)
-        self.course = [(end, ReachIntentDecoder(DIRECTION_TARGETS, DecoderWindow(end - 0.2, end, 0.1)).fit(trials, self.train))
+        self.decoder = ReachIntentDecoder(self.classes, self.window).fit(trials, self.train)
+        self.course = [(end, ReachIntentDecoder(self.classes, DecoderWindow(end - 0.2, end, 0.1)).fit(trials, self.train))
                        for end in np.round(np.arange(-0.6, 0.001, 0.05), 2)]
-        self.order = preferred_order(trials, self.train, self.window)
+        self.order = preferred_order(trials, self.train, self.window, self.classes)
 
-        self.sim = FrankaSimulation()
+        self.sim = FrankaSimulation(scene="six" if args.scheme == "six" else "three")
         self.controller = FrankaPickController(self.sim, on_step=self._tick)
         unique_targets = np.unique(trials.target_xy, axis=0)
-        self.renderer = IntracorticalRenderer(self.sim, trials, unique_targets, SLOWDOWN)
+        self.renderer = IntracorticalRenderer(self.sim, trials, unique_targets, SLOWDOWN, classes=self.classes,
+                                              sectors=SIX_SECTORS if args.scheme == "six" else SECTORS)
         self.state = IntracorticalState(stats=load_stats(evaluation))
         self.steps_per_frame = round(1 / (FPS * self.sim.model.opt.timestep))
         self.step_count = 0
@@ -156,7 +156,7 @@ class Demo:
 
         decoded = self.play(first)
         result["first"] = decoded
-        if decoded not in ("APPLE", "CUP", "PHONE"):
+        if decoded not in self.sim.OBJECTS:
             return self.finish(result, second)
         self.cancel_requested = False
         self.start_trial("CANCEL")
@@ -173,7 +173,7 @@ class Demo:
             self.idle(1 / FPS)
         self.state.robot_phase = "idle"
         decoded = self.play(second)
-        if decoded not in ("APPLE", "CUP", "PHONE"):
+        if decoded not in self.sim.OBJECTS:
             return self.finish(result, second)
         self.state.banner, self.state.banner_color = f"robot picking {decoded}", ACCENT
         result.update(final_target=decoded, pick=self.controller.execute("pick", decoded))
@@ -227,12 +227,19 @@ def main() -> int:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--nwb", type=Path, default=DEFAULT_NWB)
-    parser.add_argument("--eval", type=Path, default=Path("artifacts/results/step4e_intracortical_eval.json"))
+    parser.add_argument("--scheme", choices=sorted(SCHEME_TARGETS), default="six",
+                        help="'four' reproduces the 4-direction Step 4e demo")
+    parser.add_argument("--eval", type=Path, default=None)
     parser.add_argument("--first", default="CUP")
-    parser.add_argument("--second", default="APPLE")
-    parser.add_argument("--video", type=Path, default=Path("artifacts/videos/step4e/intracortical_demo.mp4"))
+    parser.add_argument("--second", default=None, help="default BOTTLE with six directions, APPLE with four")
+    parser.add_argument("--video", type=Path, default=None)
     parser.add_argument("--log", type=Path, default=Path("artifacts/logs/step4e_intracortical_demo.jsonl"))
     args = parser.parse_args()
+    six = args.scheme == "six"
+    args.eval = args.eval or Path("artifacts/results/step4f_intracortical_eval_six.json" if six
+                                  else "artifacts/results/step4e_intracortical_eval.json")
+    args.second = args.second or ("BOTTLE" if six else "APPLE")
+    args.video = args.video or Path(f"artifacts/videos/step4e/intracortical_demo{'_six' if six else ''}.mp4")
     if shutil.which("ffmpeg") is None:
         parser.error("ffmpeg is required")
     demo = Demo(args)
@@ -253,7 +260,7 @@ def main() -> int:
         process.stdin.close()
         process.wait()
         demo.renderer.close()
-    shots = Path("artifacts/screenshots/step4e")
+    shots = Path(f"artifacts/screenshots/step4e{'_six' if args.scheme == 'six' else ''}")
     shots.mkdir(parents=True, exist_ok=True)
     for label, frame in demo.keyframes:
         Image.fromarray(frame).save(shots / f"{label}.png")

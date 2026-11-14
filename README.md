@@ -1,6 +1,6 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 4d (SSVEP early stopping) is verified. Step 4e (intracortical decoder) is implemented and awaits the user's verification. Step 5 has not started.
+NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 4d (SSVEP early stopping) is verified. Steps 4e (intracortical decoder) and 4f (six targets, five graspable objects) are verified. Step 5 has not started.
 
 ## Step 1 setup
 
@@ -153,7 +153,7 @@ Held-out S1–S10, 160 trials:
 
 Early stopping is about 27% faster per decision, at the cost of one more wrong decision in 160. With two-look confirm it adds one wrong action in 80 pairs. The demo's statistics panel shows the rates for whichever mode is running.
 
-## Step 4e — intracortical reach-intention decoder (awaiting verification)
+## Step 4e — intracortical reach-intention decoder
 
 Step 4e plugs a second, implant-style decoder into the same robot pipeline. The data is recorded spiking from 162 neurons in macaque M1 and PMd during delayed reaching, from the Neural Latents Benchmark MC_Maze_Large dataset (DANDI 000138; Churchland lab, monkey J). It is read with `h5py` and is not committed. The nine reach targets are grouped by direction and mapped onto the table layout: left → APPLE, up → CUP, upper-right → PHONE, lower-right → CANCEL.
 
@@ -168,3 +168,27 @@ uv pip install --python .venv/bin/python -e . --group intracortical
 - Held-out results: 97.6% accuracy (95.5% balanced) against a majority-class chance of 34.4%. A shuffled-label control reaches 23.2%. With a 200 ms window, accuracy is 74% at 600 ms before movement and rises to 96% at movement onset.
 - Demo: CUP is decoded and the robot reaches; a CANCEL reach is decoded mid-reach and the robot aborts; APPLE is decoded and picked. Trials are the first held-out val trials of each direction, chosen by ground truth. The robot code is unchanged from the SSVEP demo.
 - Limitations: this is recorded monkey data, replayed; it is not a human or a live implant. Decoding a four-way direction from a well-trained delayed-reach task is easier than free, everyday intent. LDA posteriors are overconfident (often 1.00) and are not calibrated probabilities.
+
+## Step 4f — six targets, five graspable objects
+
+The table now holds a banana, an apple, a mug, a bottle and a phone, with CANCEL as the sixth target. The three-object scene and the four-target configuration remain the defaults for the verified earlier steps. Both demos now default to six.
+
+```bash
+.venv/bin/python scripts/step4f_select_frequencies.py                                       # chosen on S11–S20
+.venv/bin/python scripts/step4b_ssvep_eval.py --config interface/ssvep_targets_6.yaml --output artifacts/results/step4f_ssvep_eval.json
+.venv/bin/python scripts/step4d_early_stop_eval.py --config interface/ssvep_targets_6.yaml --output artifacts/results/step4f_early_stop_eval.json
+.venv/bin/python scripts/step4e_intracortical_eval.py --scheme six
+.venv/bin/python scripts/step4c_hero_demo.py               # six targets: CUP -> CANCEL mid-reach -> BOTTLE
+.venv/bin/python scripts/step4e_intracortical_demo.py      # six directions: CUP -> CANCEL mid-reach -> BOTTLE
+```
+
+| Decoder | 4 targets (held-out) | 6 targets (held-out) |
+|---|---|---|
+| SSVEP CCA, single look | 90.6% accuracy, 7.5% wrong actions | 87.1% accuracy, 3.8% wrong actions, 20% UNSURE |
+| SSVEP, two-look confirm | 1.2% wrong actions | 0.8% wrong actions (1 of 120), 37.5% of pairs need another look |
+| SSVEP with early stopping | 42 bits/min | 48 bits/min, 1.68 s mean decision |
+| Intracortical LDA, pre-movement | 97.6% (95.5% balanced) | 89.6% (84.6% balanced) |
+
+- SSVEP frequencies (8.6, 9.8, 11.0, 12.2, 14.0 and 15.8 Hz) are the best of the 56 six-frequency sets whose 1st–3rd harmonics stay at least 1.2 Hz apart, scored on S11–S20 only. The UNSURE threshold (0.075) and early-stopping rule were chosen on the same subjects. The stricter threshold trades more "look again" for fewer wrong actions.
+- The six intracortical directions split the two left-hand targets (−174° and 173°) rather than the upper-right pair (30° and 39°). This was chosen by train-split CV (84.7% versus 76.9%). Most held-out errors are among the three left-side directions.
+- Robot: the banana is three capsules and is gripped across its middle. The bottle is gripped by its 2.4 cm neck. The six-object scene uses elliptic friction cones with impratio 10, which stopped the bottle creeping out of a sustained grip. It also re-aims the gripper by the measured 1.5–4.8 mm gravity-sag error before closing. Result: 40 of 40 picks had both fingers in contact at closing and lifted the object, with each object displaced up to ±1.5 cm.

@@ -33,6 +33,7 @@ class ObjectSpec:
     grasp_height: float  # tool-centre-point height above the table when grasping
     mass: float
     friction: float = 1.5  # sliding friction against the rubber fingertip pads
+    rest_height: float | None = None  # body origin height on the table, when not implied by ``size``
 
 
 OBJECTS = (
@@ -41,17 +42,34 @@ OBJECTS = (
     ObjectSpec("PHONE", (0.50, 0.22), "box", (0.028, 0.065, 0.012), (0.08, 0.09, 0.12, 1), (1.0, 0.0), 0.016, 0.15),
 )
 
+# Five objects, left to right as seen by the subject (world -y to +y).
+SIX_OBJECTS = (
+    # Curved banana: three capsules lying on the table, gripped across the middle segment.
+    ObjectSpec("BANANA", (0.50, -0.32), "capsule", (0.017, 0.035), (0.96, 0.82, 0.22, 1), (0.0, 1.0), 0.018, 0.12,
+               2.0, rest_height=0.017),
+    ObjectSpec("APPLE", (0.58, -0.16), "sphere", (0.032,), (0.80, 0.08, 0.06, 1), (0.0, 1.0), 0.032, 0.12, 2.0),
+    ObjectSpec("CUP", (0.50, 0.0), "cylinder", (0.030, 0.045), (0.92, 0.92, 0.95, 1), (0.0, 1.0), 0.050, 0.10),
+    # Bottle: 12 cm body plus a 2.4 cm-wide neck; gripped by the neck so the palm clears the top.
+    ObjectSpec("BOTTLE", (0.58, 0.16), "cylinder", (0.028, 0.060), (0.25, 0.62, 0.85, 1), (0.0, 1.0), 0.138, 0.15, 2.0),
+    ObjectSpec("PHONE", (0.50, 0.32), "box", (0.028, 0.065, 0.012), (0.08, 0.09, 0.12, 1), (1.0, 0.0), 0.016, 0.15),
+)
+SCENES = {"three": OBJECTS, "six": SIX_OBJECTS}
+
 
 class FrankaSimulation:
     """Panda arm, table, and the selectable objects; nothing is moved kinematically."""
 
     OBJECTS = tuple(spec.name for spec in OBJECTS)
 
-    def __init__(self, gui: bool = False) -> None:
+    def __init__(self, gui: bool = False, scene: str = "three") -> None:
         if not PANDA_XML.is_file():
             raise FileNotFoundError(f"Franka model not found at {PANDA_XML}; run scripts/fetch_franka.sh")
-        self.object_specs = {spec.name: spec for spec in OBJECTS}
-        self.model = _build_model()
+        if scene not in SCENES:
+            raise ValueError(f"Unknown scene {scene!r}; choose from {sorted(SCENES)}")
+        self.scene = scene
+        self.OBJECTS = tuple(spec.name for spec in SCENES[scene])
+        self.object_specs = {spec.name: spec for spec in SCENES[scene]}
+        self.model = _build_model(SCENES[scene], wide=scene != "three")
         self.data = mujoco.MjData(self.model)
         self.tcp_site = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "tcp")
         self.left_finger = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "left_finger")
@@ -106,13 +124,18 @@ class FrankaSimulation:
             self.viewer = None
 
 
-def _build_model() -> mujoco.MjModel:
+def _build_model(objects: tuple[ObjectSpec, ...] = OBJECTS, wide: bool = False) -> mujoco.MjModel:
     spec = mujoco.MjSpec.from_file(str(PANDA_XML))
     spec.visual.global_.offwidth = 1920
     spec.visual.global_.offheight = 1080
     spec.visual.quality.shadowsize = 4096
     spec.visual.headlight.ambient = [0.25, 0.25, 0.25]
     spec.visual.headlight.diffuse = [0.4, 0.4, 0.4]
+    if wide:
+        # Elliptic friction cones with a high impratio stop the soft-contact creep that let the
+        # bottle slide out of a sustained neck grip (MuJoCo's recommended setting for grasping).
+        spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+        spec.option.impratio = 10
 
     spec.add_texture(name="floor_tex", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
                      rgb1=[0.10, 0.11, 0.13], rgb2=[0.13, 0.14, 0.17], width=512, height=512)
@@ -133,17 +156,31 @@ def _build_model() -> mujoco.MjModel:
 
     spec.body("hand").add_site(name="tcp", pos=[0, 0, TCP_OFFSET], size=[0.005, 0.005, 0.005], rgba=[0, 1, 0, 0])
 
-    for item in OBJECTS:
-        height = item.size[{"sphere": 0, "cylinder": 1, "box": 2}[item.geom]]
+    for item in objects:
+        height = item.rest_height if item.rest_height is not None else item.size[
+            {"sphere": 0, "cylinder": 1, "box": 2}[item.geom]]
         body = world.add_body(name=item.name, pos=[item.xy[0], item.xy[1], height + 0.002])
         body.add_freejoint()
-        body.add_geom(name=f"{item.name}_geom", type=getattr(mujoco.mjtGeom, f"mjGEOM_{item.geom.upper()}"),
-                      size=list(item.size) + [0] * (3 - len(item.size)), rgba=list(item.rgba), mass=item.mass,
-                      friction=[item.friction, 0.02, 0.001], condim=4, solref=[0.01, 1])
+        contact = dict(friction=[item.friction, 0.02, 0.001], condim=4, solref=[0.01, 1])
+        if item.name == "BANANA":
+            half = item.size[1]
+            segments = [((-half, 0, 0), (half, 0, 0)), ((half, 0, 0), (2 * half, 0.02, 0)), ((-half, 0, 0), (-2 * half, 0.02, 0))]
+            for index, (a, b) in enumerate(segments):
+                body.add_geom(name=f"BANANA_geom{'' if index == 0 else index}", type=mujoco.mjtGeom.mjGEOM_CAPSULE,
+                              fromto=[*a, *b], size=[item.size[0], 0, 0], rgba=list(item.rgba), mass=item.mass / 3, **contact)
+        else:
+            body.add_geom(name=f"{item.name}_geom", type=getattr(mujoco.mjtGeom, f"mjGEOM_{item.geom.upper()}"),
+                          size=list(item.size) + [0] * (3 - len(item.size)), rgba=list(item.rgba), mass=item.mass, **contact)
+        if item.name == "BOTTLE":
+            body.add_geom(name="BOTTLE_neck", type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.012, 0.018, 0],
+                          pos=[0, 0, item.size[1] + 0.018], rgba=list(item.rgba), mass=0.01, **contact)
         _decorate(body, item)
 
-    world.add_camera(name="overview", pos=[1.30, -0.90, 0.80], xyaxes=_look_at([1.30, -0.90, 0.80], [0.40, 0.0, 0.20]))
-    world.add_camera(name="robot_view", pos=[1.05, 0, 0.75], xyaxes=_look_at([1.05, 0, 0.75], [0.50, 0.0, 0.0]))
+    overview_eye = [1.40, -1.00, 0.88] if wide else [1.30, -0.90, 0.80]
+    view_eye = [1.10, 0, 0.80] if wide else [1.05, 0, 0.75]
+    view_target = [0.53, 0.0, 0.02] if wide else [0.50, 0.0, 0.0]
+    world.add_camera(name="overview", pos=overview_eye, xyaxes=_look_at(overview_eye, [0.40, 0.0, 0.20]))
+    world.add_camera(name="robot_view", pos=view_eye, xyaxes=_look_at(view_eye, view_target))
     return spec.compile()
 
 
@@ -170,6 +207,15 @@ def _decorate(body, item: ObjectSpec) -> None:
                       rgba=[0.35, 0.2, 0.1, 1], **visual)  # coffee surface
         body.add_geom(type=mujoco.mjtGeom.mjGEOM_CAPSULE, size=[0.005, 0.018, 0], pos=[0.038, 0, 0.0],
                       rgba=list(item.rgba), **visual)  # handle
+    elif item.name == "BANANA":
+        for x in (-2 * item.size[1], 2 * item.size[1]):
+            body.add_geom(type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[0.008, 0, 0], pos=[x * 1.03, 0.021, 0],
+                          rgba=[0.35, 0.25, 0.1, 1], **visual)  # brown tips
+    elif item.name == "BOTTLE":
+        body.add_geom(type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.013, 0.004, 0], pos=[0, 0, item.size[1] + 0.039],
+                      rgba=[0.95, 0.95, 0.95, 1], **visual)  # cap
+        body.add_geom(type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.0285, 0.018, 0], pos=[0, 0, 0.005],
+                      rgba=[0.95, 0.95, 0.95, 1], **visual)  # label
     elif item.name == "PHONE":
         body.add_geom(type=mujoco.mjtGeom.mjGEOM_BOX, size=[0.025, 0.060, 0.0005], pos=[0, 0, 0.0122],
                       rgba=[0.15, 0.45, 0.95, 1], **visual)  # screen

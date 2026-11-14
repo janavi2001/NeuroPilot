@@ -14,7 +14,9 @@ from pathlib import Path
 import numpy as np
 
 from bci.intracortical_decoder import DecoderWindow, ReachIntentDecoder
-from bci.nlb_data import DEFAULT_NWB, DIRECTION_TARGETS, load_mc_maze
+from bci.nlb_data import DEFAULT_NWB, SCHEME_TARGETS, load_mc_maze
+
+DIRECTION_TARGETS = SCHEME_TARGETS["four"]
 
 
 def accuracy(decoder, trials, indices):
@@ -40,9 +42,14 @@ def cross_validate(trials, train, window, folds=5, seed=0):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--nwb", type=Path, default=DEFAULT_NWB)
-    parser.add_argument("--output", type=Path, default=Path("artifacts/results/step4e_intracortical_eval.json"))
+    parser.add_argument("--scheme", choices=sorted(SCHEME_TARGETS), default="four")
+    parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
-    trials = load_mc_maze(args.nwb)
+    global DIRECTION_TARGETS
+    DIRECTION_TARGETS = SCHEME_TARGETS[args.scheme]
+    args.output = args.output or Path("artifacts/results/step4e_intracortical_eval.json" if args.scheme == "four"
+                                      else f"artifacts/results/step4f_intracortical_eval_{args.scheme}.json")
+    trials = load_mc_maze(args.nwb, args.scheme)
     train = np.flatnonzero(trials.split == "train")
     val = np.flatnonzero(trials.split == "val")
     print(f"MC_Maze_Large: {trials.n_units} units, {len(train)} train / {len(val)} val trials (official NLB split)")
@@ -80,7 +87,8 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({
-        "dataset": "NLB MC_Maze_Large (DANDI 000138), monkey Jenkins, M1/PMd", "units": trials.n_units,
+        "dataset": "NLB MC_Maze_Large (DANDI 000138), monkey Jenkins, M1/PMd", "scheme": args.scheme,
+        "classes": list(DIRECTION_TARGETS), "units": trials.n_units,
         "train_trials": int(len(train)), "val_trials": int(len(val)),
         "window": {"start": window.start, "stop": window.stop, "bin_seconds": window.bin_seconds},
         "cv_balanced_accuracy": {str(k): v for k, v in cv.items()},

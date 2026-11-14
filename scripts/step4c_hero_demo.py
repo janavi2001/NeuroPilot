@@ -23,7 +23,9 @@ from bci.ssvep_data import load_beta_trials
 from bci.ssvep_decoder import UNSURE, SSVEPDecoder
 from bci.ssvep_stopping import EarlyStoppingDecoder, StoppingRule
 from interface.ssvep_confirm import ConfirmingSelector
-from interface.ssvep_selector import DEFAULT_CONFIG, load_ssvep_config
+from interface.ssvep_selector import load_ssvep_config
+
+SIX_TARGET_CONFIG = Path("interface/ssvep_targets_6.yaml")
 from interface.visualization.hero_renderer import ACCENT, COLORS, DemoState, HeroRenderer
 from interface.visualization.look_track import LookTrack, tracks_for_sequence
 from robot.franka_controller import FrankaPickController
@@ -70,9 +72,13 @@ class Demo:
             config.targets, len(config.channels), self.rule, metadata["sampling_rate_hz"],
             config.window_seconds, config.harmonics, config.margin_threshold)
 
-        self.sim = FrankaSimulation()
+        import yaml
+
+        raw_config = yaml.safe_load(Path(args.config).read_text())
+        self.sim = FrankaSimulation(scene=raw_config.get("scene", "three"))
         self.controller = FrankaPickController(self.sim, on_step=self._tick)
-        self.state = DemoState(subject=args.subject, stats=load_stats(early=not args.fixed_window))
+        self.state = DemoState(subject=args.subject,
+                               stats=load_stats(raw_config.get("results", {}), early=not args.fixed_window))
         self.renderer = HeroRenderer(self.sim, config.targets, list(config.channels), self.eeg_info,
                                      config.margin_threshold, stopping_rule=self.rule)
         self.steps_per_frame = round(1 / (FPS * self.sim.model.opt.timestep))
@@ -232,7 +238,7 @@ class Demo:
             self.state.card_color = "#ff7b72"
         self.idle(2.5, phase="hold" if lifted else "idle")
         stats = self.state.stats
-        self.state.card = (title, line, f"4 targets · held-out accuracy {stats.get('single-look accuracy', 'n/a')} · "
+        self.state.card = (title, line, f"{len(self.config.targets)} targets · held-out accuracy {stats.get('single-look accuracy', 'n/a')} · "
                            f"wrong actions {stats.get('wrong actions, two-look confirm', 'n/a')} with two-look confirm\n"
                            "Replayed EEG from one subject; not a live headset. Motion is scripted IK, not a learned policy.")
         self.idle(4.0, phase="hold" if lifted else "idle")
@@ -240,11 +246,13 @@ class Demo:
         return result
 
 
-def load_stats(early: bool = False) -> dict[str, str]:
+def load_stats(results: dict | None = None, early: bool = False) -> dict[str, str]:
+    """Measured held-out statistics for the target configuration in use."""
+    results = results or {}
     stats = {}
-    stopping = Path("artifacts/results/step4d_early_stop_eval.json")
-    single = Path("artifacts/results/step4b_ssvep_eval.json")
-    confirm = Path("artifacts/results/step4c_confirm_eval.json")
+    stopping = Path(results.get("early_stop", "artifacts/results/step4d_early_stop_eval.json"))
+    single = Path(results.get("eval", "artifacts/results/step4b_ssvep_eval.json"))
+    confirm = Path(results.get("confirm", "artifacts/results/step4c_confirm_eval.json" if not results else ""))
     if single.is_file():
         data = json.loads(single.read_text())
         stats["single-look accuracy"] = f"{data['test_without_threshold']['raw_accuracy']:.1%}"
@@ -254,6 +262,11 @@ def load_stats(early: bool = False) -> dict[str, str]:
         data = json.loads(confirm.read_text())
         stats["wrong actions, two-look confirm"] = f"{data['two_look_confirm']['wrong_action_rate']:.1%}"
         stats["information rate"] = f"{data['itr']['bits_per_minute']:.0f} bits/min"
+    elif stopping.is_file():
+        data = json.loads(stopping.read_text())["test"]
+        stats["wrong actions, two-look confirm"] = (f"{data['confirm_fixed']['wrong_action_rate']:.1%} "
+                                                    f"({data['confirm_fixed']['wrong']}/{data['confirm_fixed']['pairs']})")
+        stats["information rate"] = f"{data['fixed']['bits_per_minute']:.0f} bits/min"
     if early and stopping.is_file():
         data = json.loads(stopping.read_text())["test"]
         # Report the error rates of the decoder actually running, not the fixed-window ones.
@@ -273,15 +286,19 @@ def main() -> int:
     from PIL import Image
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--config", type=Path, default=SIX_TARGET_CONFIG,
+                        help="target layout; interface/ssvep_targets.yaml reproduces the 4-target Step 4c demo")
     parser.add_argument("--subject", type=int, default=1)
     parser.add_argument("--first", default="CUP", help="object chosen first (then cancelled mid-reach)")
-    parser.add_argument("--second", default="PHONE", help="object chosen after the change of mind")
+    parser.add_argument("--second", default=None, help="object chosen after the change of mind "
+                        "(default BOTTLE with six targets, PHONE with four)")
     parser.add_argument("--no-change-of-mind", action="store_true", help="skip the mid-reach CANCEL look")
     parser.add_argument("--fixed-window", action="store_true", help="always decode the full 2 s window (no early stopping)")
     parser.add_argument("--video", type=Path, default=None)
     parser.add_argument("--log", type=Path, default=Path("artifacts/logs/step4c_hero_demo.jsonl"))
     args = parser.parse_args()
+    if args.second is None:
+        args.second = "BOTTLE" if "BOTTLE" in load_ssvep_config(args.config).targets else "PHONE"
     if shutil.which("ffmpeg") is None:
         parser.error("ffmpeg is required")
 

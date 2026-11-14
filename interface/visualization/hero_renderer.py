@@ -20,7 +20,8 @@ PANEL = "#161b22"
 TEXT = "#e6edf3"
 MUTED = "#8b949e"
 ACCENT = "#7ee787"
-COLORS = {"APPLE": "#ff6b6b", "CUP": "#f2cc60", "PHONE": "#58a6ff", "CANCEL": "#d2a8ff"}
+COLORS = {"BANANA": "#e3d026", "APPLE": "#ff6b6b", "CUP": "#f0883e", "BOTTLE": "#39c5cf", "PHONE": "#58a6ff",
+          "CANCEL": "#d2a8ff"}
 FLICKER_SLOWDOWN = 8.0  # rings pulse 8x slower than the real stimulus (photosensitivity-safe)
 VIEW_SIZE = (600, 640)  # height, width of each MuJoCo panel
 
@@ -102,12 +103,15 @@ class HeroRenderer:
         ax.set_axis_off()
         camera = mujoco.mj_name2id(self.sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "robot_view")
         height, width = VIEW_SIZE
-        for name in self.sim.OBJECTS:
+        crowded = len(self.sim.OBJECTS) > 3
+        for index, name in enumerate(self.sim.OBJECTS):
             u, v = _project(self.sim, camera, self.sim.position(name), width, height)
-            self._tag(ax, name, u, v, 46, state)
+            # With many objects, alternate labels below/above so neighbours do not overlap.
+            self._tag(ax, name, u, v, 34 if crowded else 46, state, label_below=not (crowded and index % 2))
         self._tag(ax, "CANCEL", width - 70, height - 95, 40, state, square=True)
 
-    def _tag(self, ax, name: str, u: float, v: float, radius: float, state: DemoState, square: bool = False) -> None:
+    def _tag(self, ax, name: str, u: float, v: float, radius: float, state: DemoState, square: bool = False,
+             label_below: bool = True) -> None:
         color = COLORS[name]
         pulse = 0.5 + 0.5 * np.sin(2 * np.pi * self.targets[name] / FLICKER_SLOWDOWN * state.time)
         alpha = 0.25 + 0.55 * pulse
@@ -117,12 +121,13 @@ class HeroRenderer:
             ax.text(u, v, "✕", color="white", fontsize=22, ha="center", va="center", fontweight="bold")
         else:
             ax.add_patch(Circle((u, v), radius, fill=False, edgecolor=color, linewidth=3 + 3 * pulse, alpha=alpha))
-        ax.text(u, v + radius + 16, f"{name}  {self.targets[name]:.1f} Hz", color=color, fontsize=10,
+        side = 1 if label_below else -1
+        ax.text(u, v + side * (radius + 16), f"{name}  {self.targets[name]:.1f} Hz", color=color, fontsize=10,
                 ha="center", va="center", fontweight="bold")
         if name == state.confirmed:
-            _reticle(ax, u, v, radius + 14, ACCENT, "CONFIRMED")
+            _reticle(ax, u, v, radius + 14, ACCENT, "CONFIRMED", above=label_below)
         elif name == state.candidate:
-            _reticle(ax, u, v, radius + 14, color, "PREVIEW · look again")
+            _reticle(ax, u, v, radius + 14, color, "PREVIEW · look again" if radius > 40 else "PREVIEW", above=label_below)
 
     # ---------------------------------------------------------- middle panel
     def _eeg(self, ax, state: DemoState) -> None:
@@ -136,8 +141,10 @@ class HeroRenderer:
             return
         if not live and track.decision_seconds < 2.0 - 1e-9:
             ax.axvline(track.decision_seconds, color=ACCENT, linestyle="--", linewidth=1.5)
-            ax.text(track.decision_seconds + 0.02, len(self.channel_names) + 0.55,
-                    f"decided at {track.decision_seconds:.1f} s", color=ACCENT, fontsize=9, fontweight="bold")
+            late = track.decision_seconds > 1.5
+            ax.text(track.decision_seconds + (-0.02 if late else 0.02), len(self.channel_names) + 0.55,
+                    f"decided at {track.decision_seconds:.1f} s", color=ACCENT, fontsize=9, fontweight="bold",
+                    ha="right" if late else "left")
         samples = int(round(elapsed * track.sampling_rate_hz))
         time = np.arange(samples) / track.sampling_rate_hz
         scale = 4 * np.median(np.abs(track.eeg)) + 1e-12
@@ -292,13 +299,13 @@ def _project(sim: FrankaSimulation, camera: int, point: np.ndarray, width: int, 
     return width / 2 + focal * local[0] / -local[2], height / 2 - focal * local[1] / -local[2]
 
 
-def _reticle(ax, u: float, v: float, radius: float, color: str, label: str) -> None:
+def _reticle(ax, u: float, v: float, radius: float, color: str, label: str, above: bool = True) -> None:
     for angle in (45, 135, 225, 315):
         a = np.deg2rad(angle)
         inner, outer = radius * 0.75, radius * 1.15
         ax.plot([u + inner * np.cos(a), u + outer * np.cos(a)], [v + inner * np.sin(a), v + outer * np.sin(a)],
                 color=color, linewidth=3)
-    ax.text(u, v - radius - 14, label, color=color, fontsize=11, ha="center", va="center", fontweight="bold",
+    ax.text(u, v + (-1 if above else 1) * (radius + 14), label, color=color, fontsize=11, ha="center", va="center", fontweight="bold",
             bbox=dict(boxstyle="round,pad=0.25", facecolor=BG, edgecolor=color, alpha=0.85))
 
 

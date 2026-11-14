@@ -1,0 +1,29 @@
+# Six-target SSVEP layout (five objects + CANCEL) for replayed BETA EEG.
+# Frequencies chosen by scripts/step4f_select_frequencies.py on calibration subjects
+# S11-S20 only: among the 56 six-frequency sets whose 1st-3rd harmonics stay at least
+# 1.2 Hz apart, this set scored highest (87.1% fixed-window CCA accuracy).
+# Objects are listed left to right as seen on the table.
+window_seconds: 2.0
+harmonics: 3
+channels: [O1, Oz, O2, PO3, PO4, PO7, PO8, POz]
+# Raw CCA score margin below which the decoder answers UNSURE (scripts/step4b_ssvep_eval.py).
+margin_threshold: 0.075
+cancel_target: CANCEL
+scene: six
+targets:
+  BANANA: 8.6
+  APPLE: 9.8
+  CUP: 11.0
+  BOTTLE: 12.2
+  PHONE: 14.0
+  CANCEL: 15.8
+# Early stopping (scripts/step4d_early_stop_eval.py --config interface/ssvep_targets_6.yaml,
+# chosen on S11-S20): stop when margin >= base_margin * (2 s / t)^exponent, t >= min_seconds.
+early_stop:
+  min_seconds: 0.3
+  base_margin: 0.17
+  exponent: 0.5
+# Measured results shown in the demo statistics panel.
+results:
+  eval: artifacts/results/step4f_ssvep_eval.json
+  early_stop: artifacts/results/step4f_early_stop_eval.json
