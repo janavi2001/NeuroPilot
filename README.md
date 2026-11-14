@@ -1,6 +1,6 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 5 has not started.
+NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 5 has not started.
 
 ## Step 1 setup
 
@@ -110,3 +110,24 @@ DYLD_FALLBACK_LIBRARY_PATH="$(.venv/bin/python -c 'import sysconfig; print(sysco
 - Robustness check: 24 of 24 picks succeeded with each object displaced by up to ±1.5 cm.
 - Objects are sized to fit the Panda's 8 cm gripper. The apple uses sliding friction 2.0 because a sphere slipped at 1.5.
 - Limitations: the controller reads object positions from the simulator rather than from a camera. Motion is scripted (IK waypoints), not a learned policy. Videos are written to `artifacts/videos/step4c/` and require `ffmpeg`.
+
+## Step 4c pieces 2–3 — three-panel demo, two-look confirm, cancel mid-reach
+
+```bash
+.venv/bin/python scripts/step4c_confirm_eval.py     # single look vs two-look confirm on held-out S1–S10
+.venv/bin/python scripts/step4c_hero_demo.py        # renders artifacts/videos/step4c/hero_S1.mp4 (~2 min)
+.venv/bin/python scripts/step4c_hero_demo.py --subject 7
+```
+
+The video shows three panels:
+
+- **What the subject sees:** the camera view with a flicker tag on each object and a CANCEL tile. Pulses are drawn 8× slower than the real stimulus for photosensitivity safety.
+- **Brain:** occipital EEG traces, the spectrum, and a head map of the response at the leading frequency. The decoder bars show the CCA scores computed on a window that grows with the look; nothing is animated by hand.
+- **Robot:** the Franka with a translucent ghost arm at the planned grasp pose.
+
+Story: the subject looks at CUP twice (preview, then confirm), and the robot starts reaching. Mid-reach the subject looks at CANCEL, so the robot aborts and returns home. The subject then looks at PHONE twice, and the robot grasps and lifts it. Every look uses the next recorded trial of that target, chosen by ground truth. Decoder errors play out as they really happen, and the script exits with code 1 if the final pick is not what the subject meant.
+
+- Two-look confirm on held-out S1–S10: wrong robot actions fall from 7.5% (single look) to 1.2% (1 of 80 pairs). The price is 16.2% of pairs ending with no action and twice the looking time.
+- Information transfer rate (Wolpaw, single look, 2.5 s per look including the 0.5 s cue): 1.40 bits per selection, about 34 bits/min.
+- CANCEL is honoured only before the gripper closes. Putting an object back down is not implemented.
+- Limitations: replayed EEG, not a live headset; scripted IK motion, not a learned policy; robot perception reads object poses from the simulator. CCA scores on short windows are naturally higher than at 2 s and are not probabilities.

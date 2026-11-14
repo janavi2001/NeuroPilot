@@ -14,6 +14,13 @@ import numpy as np
 from simulation.franka_environment import ARM_JOINTS, GRIPPER_CLOSED, GRIPPER_OPEN, FrankaSimulation
 
 
+class PickAborted(Exception):
+    """Raised inside a pick when the abort callback fires before the gripper closes."""
+
+
+ABORTABLE_PHASES = ("approach", "descend")
+
+
 class FrankaPickController:
     """Approach from above, descend, close the gripper, and lift the selected object."""
 
@@ -28,8 +35,40 @@ class FrankaPickController:
         self._upper = self.model.jnt_range[:ARM_JOINTS, 1]
         self._phase = "idle"
         self._on_step = on_step
+        self._should_abort: Callable[[], bool] | None = None
 
-    def execute(self, action: str, target: str) -> dict[str, object]:
+    def plan_grasp(self, target: str) -> np.ndarray:
+        """Arm joint angles at the grasp pose for ``target``, without moving the robot."""
+        spec = self.sim.object_specs[target]
+        position = self.sim.position(target)
+        rotation = self._grasp_rotation(np.asarray(spec.grasp_axis, dtype=float))
+        grasp = np.array([position[0], position[1], spec.grasp_height])
+        q = self._solve_ik(grasp + [0, 0, self.APPROACH_HEIGHT], rotation, self.sim.data.qpos[:ARM_JOINTS].copy(), 200)
+        return self._solve_ik(grasp, rotation, q, 200)
+
+    def go_home(self, seconds: float = 2.0) -> None:
+        """Smooth joint-space return to the home pose with the gripper open."""
+        self._phase = "home"
+        start = self.sim.data.qpos[:ARM_JOINTS].copy()
+        steps = max(1, int(seconds / self.model.opt.timestep))
+        for step in range(steps):
+            s = _smoothstep((step + 1) / steps)
+            self.sim.data.ctrl[:ARM_JOINTS] = start + s * (self.sim.home_qpos - start)
+            self.sim.data.ctrl[ARM_JOINTS] = GRIPPER_OPEN
+            self._step()
+
+    def execute(self, action: str, target: str, should_abort: Callable[[], bool] | None = None) -> dict[str, object]:
+        """Pick ``target``. ``should_abort`` is polled every physics step until the gripper closes."""
+        self._should_abort = should_abort
+        try:
+            return self._pick(action, target)
+        except PickAborted as aborted:
+            return {"action": action, "target": target, "aborted": True, "aborted_during": str(aborted),
+                    "lifted": False, "grasp_success": False}
+        finally:
+            self._should_abort = None
+
+    def _pick(self, action: str, target: str) -> dict[str, object]:
         if action != "pick":
             raise ValueError(f"Unsupported action: {action!r}")
         if target not in self.sim.OBJECTS:
@@ -65,6 +104,7 @@ class FrankaPickController:
             "object_tcp_distance": float(np.linalg.norm(final - tcp)),
             "max_other_object_shift": disturbed,
             "lifted": lifted and in_hand and both_fingers,
+            "aborted": False,
         }
 
     def _grasp_rotation(self, closing_axis: np.ndarray) -> np.ndarray:
@@ -110,6 +150,8 @@ class FrankaPickController:
         self.sim.step()
         if self._on_step is not None:
             self._on_step(self._phase)
+        if self._should_abort is not None and self._phase in ABORTABLE_PHASES and self._should_abort():
+            raise PickAborted(self._phase)
 
     def _solve_ik(self, position: np.ndarray, rotation: np.ndarray, q_init: np.ndarray, iterations: int = 60) -> np.ndarray:
         """Damped least-squares IK for the tool-centre-point site (position and orientation)."""
