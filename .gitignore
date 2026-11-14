@@ -9,3 +9,4 @@ data/
 artifacts/
 checkpoints/
 *.egg-info/
+third_party/mujoco_menagerie/

@@ -1,6 +1,6 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 5 has not started.
+NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 5 has not started.
 
 ## Step 1 setup
 
@@ -92,3 +92,21 @@ uv pip install --python .venv/bin/python -e . --group dev --group ssvep
 - Decoder: exact CCA against sine/cosine references (3 harmonics), 8 posterior channels, 2.0 s window from stimulus onset. If the raw score margin is below 0.025, the result is `UNSURE` and the selection is not changed.
 - Calibration: the frequency set and the margin threshold were chosen on S11–S20 only. On held-out S1–S10 (160 trials), raw accuracy was 90.6%, 5.0% of trials were `UNSURE`, and 7.5% produced a wrong action. Per-subject accuracy ranged from 62% (S7) to 100%.
 - Robot: the existing Step 3 scripted MuJoCo controller with programmatic lift verification. GR00T is not used in Step 4b.
+
+## Step 4c piece 1 — Franka Panda physical grasp
+
+This piece replaces the floating Step 3 gripper with MuJoCo Menagerie's Franka Emika Panda, loaded unmodified at a pinned commit (Apache-2.0, fetched by script and not committed). The decoded SSVEP selection drives a scripted pick: inverse-kinematics waypoints for straight-line Cartesian motion, joint position control, and a force-closed gripper. The object is never attached or teleported. Whether it is lifted is decided by contact and friction, then measured.
+
+```bash
+./scripts/fetch_franka.sh
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/step4c_franka_demo.py                               # S1: PHONE -> CANCEL -> CUP, records MP4
+.venv/bin/python scripts/step4c_franka_demo.py --subject 7 --sequence PHONE  # real decoder error: FAIL, exit code 1
+DYLD_FALLBACK_LIBRARY_PATH="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" \
+  .venv/bin/mjpython scripts/step4c_franka_demo.py --gui --no-video
+```
+
+- Verification: both fingers are in contact at grasp and after the lift, the object rises more than 10 cm and stays within 4 cm of the tool centre point, and other objects move less than 1 cm. A negative-control test runs the identical motion with the gripper open and asserts that nothing is lifted.
+- Robustness check: 24 of 24 picks succeeded with each object displaced by up to ±1.5 cm.
+- Objects are sized to fit the Panda's 8 cm gripper. The apple uses sliding friction 2.0 because a sphere slipped at 1.5.
+- Limitations: the controller reads object positions from the simulator rather than from a camera. Motion is scripted (IK waypoints), not a learned policy. Videos are written to `artifacts/videos/step4c/` and require `ffmpeg`.
