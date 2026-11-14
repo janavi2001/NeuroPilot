@@ -50,3 +50,25 @@ For subject S16, the valid 3-second four-target result was CCA 100.0% and FBCCA 
 On the Mac CPU, S1 four-target mean decode runtime was approximately 2.6 ms for CCA and 13.5 ms for FBCCA. The first correct replay identified the real 8.6 Hz target with a raw FBCCA score margin of 0.2211; scores are not calibrated probabilities.
 
 The initial evidence supports four-target SSVEP selection, with CCA as the simplest and fastest baseline. Forty-target accuracy remains meaningful but lower, and short 0.5-second windows are unreliable. A practical NeuroPilot follow-up should begin with four targets and a window near 1.5–2.0 seconds. This experiment does not integrate SSVEP into the production pipeline.
+
+## Ten-subject CCA sweep (supersedes the five-subject recommendation)
+
+Command: `.venv/bin/python -m experiments.ssvep.sweep` (S1–S10, CCA, three harmonics, targets spread evenly over 8.0–15.8 Hz). Trials are pooled across subjects; "worst" is the lowest single-subject accuracy. Rejection uses a raw CCA score-margin threshold of 0.05, chosen after looking at the data, so the rejection columns are indicative, not a held-out estimate. Per-trial predictions and margins are saved in `artifacts/results/sweep.json`.
+
+| Targets | Window | Channels | Trials | Accuracy | Worst subject | Rejected at margin ≥ 0.05 | Accuracy of accepted |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| 4 | 2.0 s | posterior8 | 160 | 90.0% | 68.8% | 12.5% | 95.7% |
+| 6 | 2.0 s | posterior8 | 240 | 90.0% | 70.8% | 12.9% | 94.7% |
+| 10 | 2.0 s | posterior8 | 400 | 84.5% | 70.0% | 20.5% | 92.8% |
+| 20 | 2.0 s | posterior8 | 800 | 78.1% | 47.5% | 27.5% | 90.7% |
+| 4 | 2.0 s | occipital3 | 160 | 85.6% | 68.8% | 19.4% | 91.5% |
+| 10 | 2.0 s | occipital3 | 400 | 78.0% | 57.5% | 26.7% | 90.4% |
+| 4 | 1.5 s | posterior8 | 160 | 82.5% | 68.8% | 21.9% | 91.2% |
+| 10 | 1.5 s | posterior8 | 400 | 75.5% | 55.0% | 26.0% | 86.1% |
+
+Findings:
+
+- S1–S5 were easier subjects than S6–S10, so the earlier 96% five-subject mean was optimistic. Over ten subjects, four targets give 90.0%, and S8 and S10 drop to 68.8%.
+- The eight posterior channels beat O1/Oz/O2 in every configuration. The earlier three-channel advantage was noise from a 16-trial sample.
+- A 2.0 s window beats 1.5 s in every configuration. Two seconds is the longest valid window for S1–S15.
+- Only 4 and 6 targets reach about 90% without rejection. Ten targets reach 84.5%, or 92.8% if about one trial in five is rejected as uncertain.
