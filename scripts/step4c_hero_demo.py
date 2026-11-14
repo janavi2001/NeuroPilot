@@ -21,6 +21,7 @@ import numpy as np
 
 from bci.ssvep_data import load_beta_trials
 from bci.ssvep_decoder import UNSURE, SSVEPDecoder
+from bci.ssvep_stopping import EarlyStoppingDecoder, StoppingRule
 from interface.ssvep_confirm import ConfirmingSelector
 from interface.ssvep_selector import DEFAULT_CONFIG, load_ssvep_config
 from interface.visualization.hero_renderer import ACCENT, COLORS, DemoState, HeroRenderer
@@ -64,12 +65,16 @@ class Demo:
         self.decoder = SSVEPDecoder(config.targets, len(config.channels), metadata["sampling_rate_hz"],
                                     config.window_seconds, config.harmonics, config.margin_threshold)
         self.selector = ConfirmingSelector(config.objects, config.cancel_target)
+        self.rule = None if args.fixed_window else StoppingRule.from_yaml(args.config)
+        self.stopper = None if self.rule is None else EarlyStoppingDecoder(
+            config.targets, len(config.channels), self.rule, metadata["sampling_rate_hz"],
+            config.window_seconds, config.harmonics, config.margin_threshold)
 
         self.sim = FrankaSimulation()
         self.controller = FrankaPickController(self.sim, on_step=self._tick)
-        self.state = DemoState(subject=args.subject, stats=load_stats())
+        self.state = DemoState(subject=args.subject, stats=load_stats(early=not args.fixed_window))
         self.renderer = HeroRenderer(self.sim, config.targets, list(config.channels), self.eeg_info,
-                                     config.margin_threshold)
+                                     config.margin_threshold, stopping_rule=self.rule)
         self.steps_per_frame = round(1 / (FPS * self.sim.model.opt.timestep))
         self.step_count = 0
         self.look_start_step = 0
@@ -86,7 +91,7 @@ class Demo:
         self.state.time = self.step_count * self.sim.model.opt.timestep
         if self.state.look is not None:
             self.state.look_elapsed = (self.step_count - self.look_start_step) * self.sim.model.opt.timestep
-            if self.state.look_elapsed >= self.config.window_seconds - 1e-9:
+            if self.state.look_elapsed >= self.state.look.decision_seconds - 1e-9:
                 self._finish_look()
         if self.step_count % self.steps_per_frame == 0:
             self.writer.write(self.renderer.frame(self.state))
@@ -105,7 +110,8 @@ class Demo:
             self.state.history.append(f"no recorded {intended} trials left")
             return False
         index = self.unused[intended].pop(0)
-        self.state.look = LookTrack.build(intended, index + 1, self.eeg[index], self.eeg_all[index], self.decoder, FPS)
+        self.state.look = LookTrack.build(intended, index + 1, self.eeg[index], self.eeg_all[index], self.decoder, FPS,
+                                          stopper=self.stopper)
         self.state.look_elapsed = 0.0
         self.look_start_step = self.step_count
         self.state.banner = f"subject looks at {intended}"
@@ -119,7 +125,7 @@ class Demo:
         after = self.selector.apply(prediction)
         decided = prediction["intent"]
         margin = prediction["margin"]
-        line = f"#{len(self.log) + 1:<2} saw {track.intended:<6} → {decided:<6} (margin {margin:.2f})"
+        line = f"#{len(self.log) + 1:<2} saw {track.intended:<6} → {decided:<6} @{track.decision_seconds:.1f}s"
         if after.event == "confirm":
             outcome, color = f"CONFIRMED {after.confirmed}", ACCENT
         elif after.event in ("candidate", "switch"):
@@ -137,7 +143,8 @@ class Demo:
         self.log.append({
             "timestamp": datetime.now(timezone.utc).isoformat(), "subject": self.args.subject,
             "trial": track.trial_number, "ground_truth": track.intended, "prediction": decided,
-            "score": prediction["score"], "margin": margin, "event": after.event,
+            "score": prediction["score"], "margin": margin, "decision_seconds": track.decision_seconds,
+            "early_stop": track.decision_seconds < self.config.window_seconds - 1e-9, "event": after.event,
             "candidate": after.candidate, "confirmed": after.confirmed, "previous_candidate": before.candidate,
             "robot_phase": self.state.robot_phase,
         })
@@ -233,8 +240,9 @@ class Demo:
         return result
 
 
-def load_stats() -> dict[str, str]:
+def load_stats(early: bool = False) -> dict[str, str]:
     stats = {}
+    stopping = Path("artifacts/results/step4d_early_stop_eval.json")
     single = Path("artifacts/results/step4b_ssvep_eval.json")
     confirm = Path("artifacts/results/step4c_confirm_eval.json")
     if single.is_file():
@@ -246,6 +254,16 @@ def load_stats() -> dict[str, str]:
         data = json.loads(confirm.read_text())
         stats["wrong actions, two-look confirm"] = f"{data['two_look_confirm']['wrong_action_rate']:.1%}"
         stats["information rate"] = f"{data['itr']['bits_per_minute']:.0f} bits/min"
+    if early and stopping.is_file():
+        data = json.loads(stopping.read_text())["test"]
+        # Report the error rates of the decoder actually running, not the fixed-window ones.
+        stats["single-look accuracy"] = f"{data['early']['forced_accuracy']:.1%}"
+        stats["wrong actions, single look"] = f"{data['early']['wrong_action_rate']:.1%}"
+        stats["wrong actions, two-look confirm"] = (f"{data['confirm_early']['wrong_action_rate']:.1%} "
+                                                    f"({data['confirm_early']['wrong']}/{data['confirm_early']['pairs']})")
+        stats["mean decision time, early stop"] = f"{data['early']['mean_decision_seconds']:.2f} s (vs 2.00 s)"
+        stats["information rate"] = (f"{data['fixed']['bits_per_minute']:.0f} → "
+                                     f"{data['early']['bits_per_minute']:.0f} bits/min with early stop")
     return stats
 
 
@@ -260,6 +278,7 @@ def main() -> int:
     parser.add_argument("--first", default="CUP", help="object chosen first (then cancelled mid-reach)")
     parser.add_argument("--second", default="PHONE", help="object chosen after the change of mind")
     parser.add_argument("--no-change-of-mind", action="store_true", help="skip the mid-reach CANCEL look")
+    parser.add_argument("--fixed-window", action="store_true", help="always decode the full 2 s window (no early stopping)")
     parser.add_argument("--video", type=Path, default=None)
     parser.add_argument("--log", type=Path, default=Path("artifacts/logs/step4c_hero_demo.jsonl"))
     args = parser.parse_args()
@@ -302,7 +321,7 @@ def main() -> int:
 
     for row in demo.log:
         print(f"  trial {row['trial']:2d}: looked at {row['ground_truth']:<6} -> {row['prediction']:<6} "
-              f"margin {row['margin']:.3f} -> {row['event']}"
+              f"at {row['decision_seconds']:.1f} s, margin {row['margin']:.3f} -> {row['event']}"
               + (f" (robot was {row['robot_phase']})" if row["robot_phase"] not in ("idle",) else ""))
     print(f"First confirmed: {result['first_confirmed']}; aborted mid-reach: {result['aborted']}")
     print(f"Final target: {result['final_target']} (intended {result['intended']}); lifted: {result['lifted']}")

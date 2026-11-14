@@ -1,6 +1,6 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 5 has not started.
+NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 4d (SSVEP early stopping) is verified. Step 5 has not started.
 
 ## Step 1 setup
 
@@ -131,3 +131,24 @@ Story: the subject looks at CUP twice (preview, then confirm), and the robot sta
 - Information transfer rate (Wolpaw, single look, 2.5 s per look including the 0.5 s cue): 1.40 bits per selection, about 34 bits/min.
 - CANCEL is honoured only before the gripper closes. Putting an object back down is not implemented.
 - Limitations: replayed EEG, not a live headset; scripted IK motion, not a learned policy; robot perception reads object poses from the simulator. CCA scores on short windows are naturally higher than at 2 s and are not probabilities.
+
+## Step 4d — early stopping
+
+The decoder checks the look every 0.1 s and commits at the first checkpoint t ≥ 0.3 s where the gap between the top two CCA scores is at least 0.10 × (2 s / t)^1.5. Short windows therefore need a larger lead. If the lead never qualifies, the full 2 s window is decoded as before, including `UNSURE`. The rule was chosen on S11–S20 as the highest information rate whose wrong-action rate did not exceed the fixed 2 s decoder's on those subjects.
+
+```bash
+.venv/bin/python scripts/step4d_early_stop_eval.py
+.venv/bin/python scripts/step4c_hero_demo.py                  # early stopping on (default)
+.venv/bin/python scripts/step4c_hero_demo.py --fixed-window   # previous behaviour
+```
+
+Held-out S1–S10, 160 trials:
+
+| | Accuracy | Wrong action | Mean decision time | Bits/min (2.5 s/look incl. cue) |
+|---|---:|---:|---:|---:|
+| Fixed 2 s | 90.6% | 7.5% | 2.00 s | 33.7 |
+| Early stop | 90.0% | 8.1% | 1.46 s | 42.1 |
+| Two-look confirm, fixed | — | 1.2% (1/80) | 4.00 s for both looks | — |
+| Two-look confirm, early | — | 2.5% (2/80) | 2.91 s for both looks | — |
+
+Early stopping is about 27% faster per decision, at the cost of one more wrong decision in 160. With two-look confirm it adds one wrong action in 80 pairs. The demo's statistics panel shows the rates for whichever mode is running.

@@ -16,3 +16,9 @@ targets:
   CUP: 11.8
   PHONE: 13.8
   CANCEL: 15.8
+# Early stopping (scripts/step4d_early_stop_eval.py, chosen on S11-S20): stop at the
+# first 0.1 s checkpoint t >= min_seconds with margin >= base_margin * (2 s / t)^exponent.
+early_stop:
+  min_seconds: 0.3
+  base_margin: 0.10
+  exponent: 1.5

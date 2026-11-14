@@ -8,6 +8,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from bci.ssvep_decoder import SSVEPDecoder
+from bci.ssvep_stopping import EarlyStoppingDecoder
 
 TOPOMAP_CHECKPOINTS = (0.5, 1.0, 1.5, 2.0)
 MIN_GROWING_WINDOW = 0.25
@@ -32,6 +33,7 @@ class LookTrack:
     frame_times: np.ndarray
     frame_scores: np.ndarray  # frames x targets (NaN before MIN_GROWING_WINDOW)
     topomap_values: dict[float, tuple[str, np.ndarray]] = field(default_factory=dict)
+    decision_seconds: float = 2.0  # when the decision was made (earlier with early stopping)
 
     @classmethod
     def build(
@@ -42,6 +44,7 @@ class LookTrack:
         eeg_all: np.ndarray,
         decoder: SSVEPDecoder,
         fps: int,
+        stopper: EarlyStoppingDecoder | None = None,
     ) -> "LookTrack":
         fs = decoder.sampling_rate_hz
         window = decoder.window_seconds
@@ -54,8 +57,9 @@ class LookTrack:
             partial = SSVEPDecoder(decoder.targets, decoder.n_channels, fs, round(t * fs) / fs, decoder.harmonics)
             result = partial.predict(np.ascontiguousarray(eeg[:, : partial.samples]))
             scores[index] = [result["scores"][name] for name in names]
-        final = decoder.predict(eeg)
-        track = cls(intended, trial_number, eeg, eeg_all, fs, dict(decoder.targets), final, frame_times, scores)
+        final = stopper.predict(eeg) if stopper is not None else decoder.predict(eeg)
+        track = cls(intended, trial_number, eeg, eeg_all, fs, dict(decoder.targets), final, frame_times, scores,
+                    decision_seconds=float(final.get("decision_seconds", window)))
         for checkpoint in TOPOMAP_CHECKPOINTS:
             samples = int(round(checkpoint * fs))
             row = scores[min(len(frame_times) - 1, int(round(checkpoint * fps)) - 1)]

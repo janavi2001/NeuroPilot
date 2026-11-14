@@ -48,7 +48,8 @@ class DemoState:
 
 class HeroRenderer:
     def __init__(self, simulation: FrankaSimulation, targets: dict[str, float], channel_names: list[str],
-                 eeg_info, threshold: float, width: int = 1920, height: int = 1080) -> None:
+                 eeg_info, threshold: float, width: int = 1920, height: int = 1080, stopping_rule=None) -> None:
+        self.stopping_rule = stopping_rule
         self.sim = simulation
         self.targets = targets
         self.names = list(targets)
@@ -133,6 +134,10 @@ class HeroRenderer:
         ax.set_yticks([])
         if track is None:
             return
+        if not live and track.decision_seconds < 2.0 - 1e-9:
+            ax.axvline(track.decision_seconds, color=ACCENT, linestyle="--", linewidth=1.5)
+            ax.text(track.decision_seconds + 0.02, len(self.channel_names) + 0.55,
+                    f"decided at {track.decision_seconds:.1f} s", color=ACCENT, fontsize=9, fontweight="bold")
         samples = int(round(elapsed * track.sampling_rate_hz))
         time = np.arange(samples) / track.sampling_rate_hz
         scale = 4 * np.median(np.abs(track.eeg)) + 1e-12
@@ -209,8 +214,7 @@ class HeroRenderer:
     def _score_race(self, ax, state: DemoState) -> None:
         track, elapsed, live = self._active_track(state)
         _style(ax)
-        window = f"window {elapsed:.2f} s" if track else "waiting for a look"
-        _panel_title(ax, "DECODER · CCA score per target", f"{window}  ·  decision at 2.0 s, UNSURE if margin < {self.threshold:.3f}")
+        _panel_title(ax, "DECODER · CCA score per target", self._decoder_subtitle(track, elapsed, live))
         ax.set_xlim(0, 1)
         ax.set_ylim(-0.6, len(self.names) - 0.4)
         ax.set_yticks(range(len(self.names)), self.names[::-1], color=TEXT, fontsize=11)
@@ -224,6 +228,17 @@ class HeroRenderer:
             ax.barh(y, value, color=COLORS[name], alpha=0.95 if row == leader and live else 0.45, height=0.62)
             if np.isfinite(scores[row]):
                 ax.text(min(value + 0.015, 0.93), y, f"{value:.2f}", color=TEXT, fontsize=9, va="center")
+
+    def _decoder_subtitle(self, track: LookTrack | None, elapsed: float, live: bool) -> str:
+        if track is None:
+            return "waiting for a look"
+        if not live:
+            how = "early stop" if track.decision_seconds < 2.0 - 1e-9 else "full window"
+            return f"decided at {track.decision_seconds:.1f} s ({how})  ·  margin {track.final['margin']:.2f}"
+        if self.stopping_rule is None or elapsed < self.stopping_rule.min_seconds:
+            return f"window {elapsed:.2f} s  ·  decision at 2.0 s, UNSURE if margin < {self.threshold:.3f}"
+        need = self.stopping_rule.required_margin(max(elapsed, 1e-3), 2.0)
+        return f"window {elapsed:.2f} s  ·  stops early once the lead exceeds {need:.2f}"
 
     def _decisions(self, ax, state: DemoState) -> None:
         ax.set_axis_off()
@@ -259,7 +274,7 @@ class HeroRenderer:
         if state.look is not None:
             return state.look, state.look_elapsed, True
         if state.last_look is not None:
-            return state.last_look, 2.0, False
+            return state.last_look, state.last_look.decision_seconds, False
         return None, 0.0, False
 
     def close(self) -> None:
