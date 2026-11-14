@@ -1,0 +1,18 @@
+# Four-target SSVEP layout for replayed BETA EEG.
+# Frequencies are real BETA stimulus frequencies 2 Hz apart whose 1st–3rd
+# harmonics stay at least 1.8 Hz from every other target's harmonics. The
+# evenly spaced 8.0/10.6/13.2/15.8 Hz set was rejected because 2 x 8.0 Hz falls
+# 0.2 Hz from 15.8 Hz; on calibration subjects S11–S20 it scored 81.9% versus
+# 91.2% for this set. See scripts/step4b_ssvep_eval.py.
+window_seconds: 2.0
+harmonics: 3
+channels: [O1, Oz, O2, PO3, PO4, PO7, PO8, POz]
+# Raw CCA score margin below which the decoder answers UNSURE.
+# Calibrated on BETA subjects S11–S20 by scripts/step4b_ssvep_eval.py.
+margin_threshold: 0.025
+cancel_target: CANCEL
+targets:
+  APPLE: 9.8
+  CUP: 11.8
+  PHONE: 13.8
+  CANCEL: 15.8

@@ -1,6 +1,6 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 5 has not started.
+NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 5 has not started.
 
 ## Step 1 setup
 
@@ -74,3 +74,21 @@ GR00T is not used in Step 3. Do not begin Step 4 until the user verifies the scr
 The approved official route uses NVIDIA `GR00T-N1.7-LIBERO` with the `LIBERO_PANDA` embodiment on a Vast RTX 4090. `scripts/step4_gr00t_demo.py` replays real EEG, selects `CUP`, emits `Pick up the cup.`, and sends an explicit compatibility instruction to the official LIBERO runner. Because LIBERO has no cup asset, the current documented bridge uses its alphabet-soup-in-basket task; it does not silently claim that alphabet soup is a cup.
 
 The end-to-end run produced real GR00T actions and programmatic LIBERO outcomes: 3/5 successful episodes (0.600), with videos saved under `artifacts/videos/step4/`. The policy is stochastic, so this is reported as an observed evaluation result rather than a guaranteed success. Run the GPU-side runner from the official Isaac-GR00T checkout with `scripts/step4_libero_runner.py`; no scripted robot fallback is used.
+
+## Step 4b SSVEP frontend
+
+Step 4b replaces the LEFT/RIGHT menu with direct four-target SSVEP selection: each target flickers at its own frequency, and a training-free CCA decoder identifies which one the subject was looking at. The LEAF motor-imagery path remains unchanged.
+
+```bash
+uv pip install --python .venv/bin/python -e . --group dev --group ssvep
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/step4b_ssvep_eval.py           # calibrate on S11–S20, test on S1–S10
+.venv/bin/python scripts/step4b_ssvep_demo.py           # BETA S1: PHONE -> CANCEL -> CUP -> MuJoCo pick
+.venv/bin/python scripts/step4b_ssvep_demo.py --subject 7
+```
+
+- Data: real BETA SSVEP EEG (Liu et al. 2020) through MOABB, downloaded to MOABB's cache and never committed. The EEG is replayed; nobody looked at the MuJoCo objects.
+- Targets (`interface/ssvep_targets.yaml`): APPLE 9.8 Hz, CUP 11.8 Hz, PHONE 13.8 Hz, CANCEL 15.8 Hz. These are spaced so that no target's 1st–3rd harmonic falls within 1.8 Hz of another target's. The evenly spaced 8.0/10.6/13.2/15.8 Hz set was rejected because 2 × 8.0 Hz lies 0.2 Hz from 15.8 Hz.
+- Decoder: exact CCA against sine/cosine references (3 harmonics), 8 posterior channels, 2.0 s window from stimulus onset. If the raw score margin is below 0.025, the result is `UNSURE` and the selection is not changed.
+- Calibration: the frequency set and the margin threshold were chosen on S11–S20 only. On held-out S1–S10 (160 trials), raw accuracy was 90.6%, 5.0% of trials were `UNSURE`, and 7.5% produced a wrong action. Per-subject accuracy ranged from 62% (S7) to 100%.
+- Robot: the existing Step 3 scripted MuJoCo controller with programmatic lift verification. GR00T is not used in Step 4b.

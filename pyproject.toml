@@ -21,10 +21,14 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8,<9"]
+ssvep = ["moabb>=1.2,<2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools.package-data]
+interface = ["ssvep_targets.yaml"]
 
 [tool.setuptools.packages.find]
 include = ["bci*", "interface*", "robot*", "simulation*"]
