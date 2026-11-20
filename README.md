@@ -1,6 +1,19 @@
 # NeuroPilot
 
-NeuroPilot is being implemented in five gated milestones. Steps 1–4 are verified. Step 4b (SSVEP frontend) is verified. Step 4c piece 1 (Franka Panda physical grasp) is verified. Step 4c pieces 2–3 (three-panel demo, two-look confirm, cancel mid-reach) are verified. Step 4d (SSVEP early stopping) is verified. Steps 4e (intracortical decoder) and 4f (six targets, five graspable objects) are verified. Step 5 has not started.
+**Brain signals choose. A robot acts.** Recorded EEG is decoded into a goal ("put the bowl on the stove"). NVIDIA GR00T carries the goal out, and NVIDIA Cosmos shows the same run in realistic homes.
+
+### ▶ [Watch the demo video](https://drive.google.com/file/d/1rwE-JbZ1jnKiZRX-zqZIBG9UrTbcjt6N/view?usp=sharing)
+
+NeuroPilot was built in gated milestones, and all of them are verified:
+- Steps 1–4
+- Step 4b: SSVEP frontend
+- Step 4c: Franka Panda grasp, three-panel demo, two-look confirm, cancel mid-reach
+- Step 4d: SSVEP early stopping
+- Step 4e: intracortical decoder
+- Step 4f: six targets
+- Step 5a: real EEG → GR00T in the LIBERO kitchen
+- Step 5b: NVIDIA Cosmos 3 worlds
+- Steps 5c–5d: the end-to-end demo videos
 
 ## Step 1 setup
 
@@ -263,3 +276,18 @@ Nothing is animated by hand:
 - Every look is re-decoded from its recorded trial with the same early-stopping CCA. The script stops if the result differs from the decision logged in `artifacts/step5_gr00t/bci_jobs.json`.
 - Every number is read from `artifacts/results/step4f_*` and the Step 5 summaries.
 - `step4f_confirm_eval.json` comes from `scripts/step4c_confirm_eval.py --eval artifacts/results/step4f_ssvep_eval.json`.
+
+## Step 5d — narrated demo
+
+```bash
+.venv/bin/python scripts/step5d_voiceover.py        # ElevenLabs voiceover, one file per line, with word timings
+.venv/bin/python scripts/step5d_narrated_demo.py    # -> artifacts/videos/step5/neuropilot_narrated.mp4 (2:45)
+```
+
+The script is `scripts/step5d_narration.yaml`, voiced by ElevenLabs "Rachel" (`eleven_multilingual_v2`). The narration drives the pacing:
+- Every scene lasts at least as long as its line.
+- Captions light up word by word from ElevenLabs' character timestamps.
+- The panel being described is spotlighted while the rest is dimmed.
+- The first command is slowed down so it can be explained, and the on-screen tags say so.
+
+Data and checks are the same as in Step 5c. The API key is read from `ELEVENLABS_API_KEY` or `~/.config/elevenlabs_api_key` and is never printed or committed. Unchanged lines are cached, so editing one line only re-bills that line.

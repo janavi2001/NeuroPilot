@@ -10,3 +10,8 @@ artifacts/
 checkpoints/
 *.egg-info/
 third_party/mujoco_menagerie/
+
+# Credentials are never source-controlled.
+.env
+.env.*
+!.env.example

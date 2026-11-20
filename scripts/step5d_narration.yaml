@@ -1,0 +1,37 @@
+# Step 5d voiceover script. `text` is shown as captions; `speak` (optional) is what the voice reads,
+# for words a TTS engine would mispronounce. Segments play in order; the video paces itself to them.
+voice: {name: Rachel, id: 21m00Tcm4TlvDq8ikWAM, model: eleven_multilingual_v2}
+segments:
+  - id: s01_title
+    text: "This is NeuroPilot: a system where brain signals decide what a robot does."
+  - id: s02_spark
+    text: "After attending the Neuralink Student Symposium, I kept wondering: what would it take for a brain signal to help someone act in the physical world?"
+  - id: s03_idea
+    text: "My idea: the brain shouldn't have to steer every joint of a robot. It only needs to say what it wants, and a capable robot can do the rest."
+  - id: s04_eeg
+    text: "Here's how. The person looks at one of six objects on a screen, each flickering at its own rhythm. Their visual brain echoes that rhythm, and you can see it in these real recorded brain signals."
+  - id: s05_decoder
+    text: "Our decoder listens for the strongest rhythm. As evidence builds, one bar pulls ahead: the bowl."
+  - id: s06_confirm
+    text: "To prevent mistakes, the person looks twice. The robot only moves when both looks agree."
+  - id: s07_instruction
+    text: "That choice becomes a plain instruction: put the bowl on the stove."
+  - id: s08_groot
+    text: "NVIDIA's GR00T, a pretrained robot brain, reads the instruction and does the task, with no task-specific programming."
+    speak: "NVIDIA's Groot, a pretrained robot brain, reads the instruction and does the task, with no task-specific programming."
+  - id: s09_check
+    text: "The simulator confirms it: task complete."
+  - id: s10_cosmos
+    text: "But this is a simulator, and real homes look different. NVIDIA Cosmos keeps the robot's exact motion, these outlines, and repaints the world around it to look real."
+  - id: s11_plate
+    text: "Now the same loop in different worlds. The person picks the plate, and the robot pushes it forward, here in a warehouse."
+  - id: s12_unsure
+    text: "When the signal is unclear, the decoder says unsure and waits for another look instead of guessing."
+  - id: s13_wine
+    text: "The wine bottle onto the rack, at night."
+  - id: s14_stove
+    text: "And finally, turning on the stove."
+  - id: s15_worlds
+    text: "One brain decision, four worlds. This is the kind of variety a robot needs before it can help in a real home."
+  - id: s16_end
+    text: "Every decision comes from recorded brain data, and every action from a real robot run. The decoder is swappable, and the same pipeline also runs on intracortical signals like Neuralink's. NeuroPilot: brain signals choose, a robot acts."
