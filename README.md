@@ -214,3 +214,31 @@ Real BETA SSVEP EEG (held-out subject S1) → early-stopped CCA → two-look con
   - The EEG run is 5 commands from one held-out subject. The decoder's error rate comes from Step 4f's held-out statistics (0.8% wrong confirmed actions), not from these 5.
   - The brain → robot hand-off is offline: decisions are made locally first, then the jobs run on the GPU.
 - Outputs: `artifacts/step5_gr00t/summary.json`, `bci_jobs.json` and `remote_results/` (56 videos, per-job `result.json`, logs).
+
+## Step 5b — NVIDIA Cosmos 3: the brain-chosen GR00T episodes in new worlds
+
+NVIDIA `Cosmos3-Nano` (16B, bf16, inference only) re-renders the Step 5a brain-chosen GR00T episodes as photoreal video through NVIDIA's Diffusers transfer recipe (`Cosmos3OmniModularPipeline`, edge control, the recipe's `edge.json` sampling values: 50 steps, guidance 3.0, control guidance 1.5, shift 10). The control is the real episode's third-person view, upscaled to 640×640, with NVIDIA's "medium" Canny preset (100/200). The prompt (`cosmos/scenarios.py`, in NVIDIA's structured prompt schema) restyles only the world around the robot.
+
+| Clip | World | Frames | Generation | Edge F1 vs control (original sim) |
+|---|---|---|---|---|
+| BOWL → stove | modern kitchen | 41 | 251 s | 0.949 (0.987) |
+| PLATE → front of stove | modern kitchen | 73 | 479 s | 0.960 (0.989) |
+| CHEESE → bowl | modern kitchen | 41 | 262 s | 0.942 (0.988) |
+| WINE → rack | modern kitchen | 61 | 400 s | 0.896 (0.987) |
+| STOVE on | modern kitchen | 41 | 262 s | 0.947 (0.985) |
+| PLATE | warehouse | 73 | 489 s | 0.946 (0.989) |
+| PLATE | office | 73 | 490 s | 0.963 (0.989) |
+| PLATE | night kitchen | 73 | 489 s | 0.965 (0.989) |
+
+- **Edge F1:** Canny edges of each generated video are compared with the control edges, with a 3 px tolerance. The original simulator frames give the upper bound. The mean is 0.946 against 0.988 for the simulator, so the robot and object outlines of the real episode are kept.
+- **Host:** Vast RTX PRO 6000 Blackwell, 96 GB, driver 595.84, `nvidia/cuda:13.0.1-base-ubuntu22.04`. torch 2.14.1+cu130, diffusers `4f788320` (0.44.0.dev0). Peak GPU memory was 35.5 GiB. Setup took about 4 minutes. Total cost $1.93.
+- **Commands:**
+  - Locally: `python scripts/step5b_cosmos_prepare.py` builds the controls, prompts and the priority-ordered job list.
+  - On the GPU host: `scripts/step5b_cosmos_setup.sh`, then `scripts/step5b_cosmos_runner.py --negative-prompt /root/cosmos_inputs/negative_prompt.json`.
+  - Locally: `python scripts/step5b_cosmos_report.py`.
+- **Limitations:**
+  - These are generated videos. The success labels come from the original LIBERO runs, and GR00T was not re-run in the generated worlds.
+  - Small objects are sometimes reinterpreted: the stove burner becomes a glowing disc, the plate becomes a metal ring, the night kitchen's cabinet becomes a sink, and the office clip has a blurred patch at the bottom edge. WINE has the lowest F1 (0.896).
+  - The sources are 256 px simulator frames at 20 fps, about 2–4 s long.
+  - The 12 remaining episode/world combinations were not generated, to stay within budget.
+- **Outputs:** `artifacts/step5_cosmos/summary.json`, `compare/*.mp4` (simulator next to Cosmos, plus the `bci_02_PLATE__4_worlds.mp4` grid) and `remote_results/` (videos, per-clip `result.json`, logs, including the first failed attempt).
