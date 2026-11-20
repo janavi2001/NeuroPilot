@@ -229,8 +229,11 @@ NVIDIA `Cosmos3-Nano` (16B, bf16, inference only) re-renders the Step 5a brain-c
 | PLATE | warehouse | 73 | 489 s | 0.946 (0.989) |
 | PLATE | office | 73 | 490 s | 0.963 (0.989) |
 | PLATE | night kitchen | 73 | 489 s | 0.965 (0.989) |
+| CHEESE | office | 41 | 572 s* | 0.960 (0.988) |
+| WINE | night kitchen | 61 | 907 s* | 0.950 (0.987) |
 
-- **Edge F1:** Canny edges of each generated video are compared with the control edges, with a 3 px tolerance. The original simulator frames give the upper bound. The mean is 0.946 against 0.988 for the simulator, so the robot and object outlines of the real episode are kept.
+- **Edge F1:** Canny edges of each generated video are compared with the control edges, with a 3 px tolerance. The original simulator frames give the upper bound. The mean over all 10 clips is 0.948 against 0.988 for the simulator, so the robot and object outlines of the real episode are kept.
+- \* The last two clips came from a second RTX PRO 6000 host (driver 580.178) that was about 2.2× slower. Its run cost $1.39 and reached its $1.50 credit floor while STOVE/warehouse was still generating. The watchdog copied the results back and destroyed the instance, so that clip was not made. Total Cosmos cost: $3.32.
 - **Host:** Vast RTX PRO 6000 Blackwell, 96 GB, driver 595.84, `nvidia/cuda:13.0.1-base-ubuntu22.04`. torch 2.14.1+cu130, diffusers `4f788320` (0.44.0.dev0). Peak GPU memory was 35.5 GiB. Setup took about 4 minutes. Total cost $1.93.
 - **Commands:**
   - Locally: `python scripts/step5b_cosmos_prepare.py` builds the controls, prompts and the priority-ordered job list.
@@ -240,5 +243,23 @@ NVIDIA `Cosmos3-Nano` (16B, bf16, inference only) re-renders the Step 5a brain-c
   - These are generated videos. The success labels come from the original LIBERO runs, and GR00T was not re-run in the generated worlds.
   - Small objects are sometimes reinterpreted: the stove burner becomes a glowing disc, the plate becomes a metal ring, the night kitchen's cabinet becomes a sink, and the office clip has a blurred patch at the bottom edge. WINE has the lowest F1 (0.896).
   - The sources are 256 px simulator frames at 20 fps, about 2–4 s long.
-  - The 12 remaining episode/world combinations were not generated, to stay within budget.
+  - The other 10 episode/world combinations were not generated, to stay within budget.
 - **Outputs:** `artifacts/step5_cosmos/summary.json`, `compare/*.mp4` (simulator next to Cosmos, plus the `bci_02_PLATE__4_worlds.mp4` grid) and `remote_results/` (videos, per-clip `result.json`, logs, including the first failed attempt).
+
+## Step 5c — end-to-end demo video
+
+```bash
+.venv/bin/python scripts/step5c_mission_demo.py   # -> artifacts/videos/step5/neuropilot_mission.mp4 (76 s, 1920x1080)
+```
+
+The video (84 s) runs in five parts:
+1. **Command 1 (BOWL) in the plain simulator.** Real EEG traces and the CCA score race replay the recorded BETA S1 trial, the two-look confirm produces an instruction, GR00T acts, and LIBERO's success check is shown.
+2. **"Why Cosmos".** The same run appears as simulator → edge control → photoreal kitchen, side by side.
+3. **Commands 2–5.** When GR00T acts, a wipe turns the simulator into Cosmos, and each command is in a different world (warehouse, office, night kitchen, kitchen). The simulator inset stays as ground truth.
+4. **The four-world grid** for one decision.
+5. **An end card** with the measured numbers and caveats.
+
+Nothing is animated by hand:
+- Every look is re-decoded from its recorded trial with the same early-stopping CCA. The script stops if the result differs from the decision logged in `artifacts/step5_gr00t/bci_jobs.json`.
+- Every number is read from `artifacts/results/step4f_*` and the Step 5 summaries.
+- `step4f_confirm_eval.json` comes from `scripts/step4c_confirm_eval.py --eval artifacts/results/step4f_ssvep_eval.json`.
