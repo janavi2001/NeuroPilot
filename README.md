@@ -192,3 +192,25 @@ The table now holds a banana, an apple, a mug, a bottle and a phone, with CANCEL
 - SSVEP frequencies (8.6, 9.8, 11.0, 12.2, 14.0 and 15.8 Hz) are the best of the 56 six-frequency sets whose 1st–3rd harmonics stay at least 1.2 Hz apart, scored on S11–S20 only. The UNSURE threshold (0.075) and early-stopping rule were chosen on the same subjects. The stricter threshold trades more "look again" for fewer wrong actions.
 - The six intracortical directions split the two left-hand targets (−174° and 173°) rather than the upper-right pair (30° and 39°). This was chosen by train-split CV (84.7% versus 76.9%). Most held-out errors are among the three left-side directions.
 - Robot: the banana is three capsules and is gripped across its middle. The bottle is gripped by its 2.4 cm neck. The six-object scene uses elliptic friction cones with impratio 10, which stopped the bottle creeping out of a sustained grip. It also re-aims the gripper by the measured 1.5–4.8 mm gravity-sag error before closing. Result: 40 of 40 picks had both fingers in contact at closing and lifted the object, with each object displaced up to ±1.5 cm.
+
+## Step 5 (GPU) — real EEG chooses a kitchen task, pretrained GR00T performs it
+
+Real BETA SSVEP EEG (held-out subject S1) → early-stopped CCA → two-look confirm → LIBERO-Goal instruction → NVIDIA `GR00T-N1.7-LIBERO` (`libero_goal`, `LIBERO_PANDA`, **inference only, no training**) → LIBERO kitchen simulation, whose own `check_success()` decides success. The six-target decoder from Step 4f is reused unchanged. Only the object names change (`interface/ssvep_targets_kitchen.yaml`: BOWL, PLATE, CHEESE, WINE, STOVE, CANCEL), and each name maps to an exact LIBERO-Goal task.
+
+| Run | Result |
+|---|---|
+| GR00T alone, 5 tasks × 10 episodes | 50/50: bowl→stove 10/10, plate→front 10/10, cream cheese→bowl 10/10, wine→rack 10/10, turn on stove 10/10 |
+| EEG-chosen, 5 commands | 5/5 confirmed the intended object; 5/5 GR00T successes. Brain time 2.7–7.5 s per command (CHEESE needed two extra looks after two UNSURE results) |
+
+- Host: Vast RTX 4090 24 GB, driver 580.65.06, `nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04`, 80 GB disk. Isaac-GR00T commit `708617f5716c63fc0a327391492ea2b91977ae90`. About 20 s per episode. Total run cost $0.79.
+- Build jobs locally: `python scripts/step5_gr00t_jobs.py baseline --episodes 10` and `python scripts/step5_gr00t_jobs.py bci --subject 1`.
+- On the GPU host: `scripts/step5_remote_setup.sh`, then the official `run_gr00t_server.py --model-path checkpoints/GR00T-N1.7-LIBERO/libero_goal --embodiment-tag LIBERO_PANDA --use-sim-policy-wrapper`, then `scripts/step5_libero_goal_runner.py --jobs <file>` with the LIBERO venv python.
+- Safety: `scripts/step5_vast_guard.py` (local hard cap plus credit floor; destroys the instance and verifies it is gone), `scripts/step5_self_destruct.sh` (on-instance timer using Vast's per-instance key), `scripts/step5_wait_remote.py` (fails loudly on a dead or unreachable job).
+- Two upstream setup issues are handled in the setup script:
+  - The LIBERO setup downgrades mujoco 4.0.1 to 3.3.1 in place, leaving a stale plugin that fails to load. The script does a clean reinstall.
+  - `--include "libero_goal/*"` also downloads about 18 GB of training state. The script downloads only the inference files.
+- Limitations:
+  - These are NVIDIA's own LIBERO-Goal tasks, the ones the checkpoint was post-trained on. The 50/50 shows the policy works in its own benchmark, not that it generalises.
+  - The EEG run is 5 commands from one held-out subject. The decoder's error rate comes from Step 4f's held-out statistics (0.8% wrong confirmed actions), not from these 5.
+  - The brain → robot hand-off is offline: decisions are made locally first, then the jobs run on the GPU.
+- Outputs: `artifacts/step5_gr00t/summary.json`, `bci_jobs.json` and `remote_results/` (56 videos, per-job `result.json`, logs).
